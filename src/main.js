@@ -18,6 +18,8 @@ const recreateFBOButton = document.getElementById('recreateFBO');
 const resetViewButton = document.getElementById('resetView');
 const downloadBtn = document.getElementById('downloadBtn');
 const progressEl = document.getElementById('progress');
+const panelToggleBtn = document.getElementById('panelToggle');
+const panelOverlay = document.getElementById('panelOverlay');
 // fractal UI
 const fractalModeInput = document.getElementById('fractalMode');
 const fractalTypeSelect = document.getElementById('fractalType');
@@ -32,6 +34,7 @@ let panStart = new THREE.Vector2();
 let offsetStart = new THREE.Vector2();
 let fractalLine = null;
 let fractalScene = null; // offscreen generation scene if needed
+const pinchState = { startDist:0, startZoom:1 };
 
 // heuristic cache
 const analysisCache = new WeakMap();
@@ -109,6 +112,12 @@ function setupEvents() {
   recreateFBOButton.addEventListener('click', () => createRenderTarget());
   resetViewButton.addEventListener('click', () => { controls.zoom = 1; controls.offset.set(0,0); });
   downloadBtn.addEventListener('click', downloadImage);
+  if(panelToggleBtn){
+    panelToggleBtn.addEventListener('click', () => document.body.classList.toggle('panel-open'));
+  }
+  if(panelOverlay){
+    panelOverlay.addEventListener('click', () => document.body.classList.remove('panel-open'));
+  }
   fractalModeInput.addEventListener('change', () => {
     genFractalButton.disabled = !fractalModeInput.checked || !currentTexture;
     if(!fractalModeInput.checked){
@@ -130,6 +139,29 @@ function setupEvents() {
     controls.zoom = THREE.MathUtils.clamp(controls.zoom * (1 + delta), 0.2, 5);
   }, { passive: false });
   renderer.domElement.addEventListener('pointerdown', e => { isPanning = true; panStart.set(e.clientX, e.clientY); offsetStart.copy(controls.offset); });
+  // Touch pinch zoom
+  let activeTouches = new Map();
+  renderer.domElement.addEventListener('touchstart', e => {
+    for(const t of e.changedTouches){ activeTouches.set(t.identifier,{x:t.clientX,y:t.clientY}); }
+    if(activeTouches.size===2){
+      const pts=[...activeTouches.values()];
+      pinchState.startDist = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
+      pinchState.startZoom = controls.zoom;
+    }
+  }, {passive:true});
+  renderer.domElement.addEventListener('touchmove', e => {
+    if(activeTouches.size===2){
+      for(const t of e.changedTouches){ if(activeTouches.has(t.identifier)) activeTouches.set(t.identifier,{x:t.clientX,y:t.clientY}); }
+      const pts=[...activeTouches.values()];
+      const dist = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
+      if(pinchState.startDist>0){
+        const scale = dist / pinchState.startDist;
+        controls.zoom = THREE.MathUtils.clamp(pinchState.startZoom * scale, 0.2, 5);
+      }
+      e.preventDefault();
+    }
+  }, {passive:false});
+  renderer.domElement.addEventListener('touchend', e => { for(const t of e.changedTouches) activeTouches.delete(t.identifier); if(activeTouches.size<2){pinchState.startDist=0;} }, {passive:true});
   window.addEventListener('pointermove', e => {
     if(!isPanning) return;
     const dx = (e.clientX - panStart.x) / renderer.domElement.clientWidth;
