@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Framebuffer Texture Image Converter</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+      html,body{margin:0;padding:0;height:100%;background:#111;color:#ddd;font-family:system-ui,-apple-system,sans-serif}
+      #app{height:100%;display:flex;flex-direction:column}
+      header{padding:.75rem 1rem;display:flex;gap:.75rem;align-items:center;background:#181818;box-shadow:0 2px 4px #0008;z-index:10}
+      header h1{font-size:1rem;margin:0;font-weight:600;letter-spacing:.5px}
+      input[type=file]{color:#ccc}
+      .spacer{flex:1}
+      #progress{font-size:.75rem;opacity:.7}
+      main{flex:1;display:flex;min-height:0}
+      #viewport{flex:1;position:relative}
+      canvas{display:block;outline:none}
+      #sidepanel{width:320px;max-width:50%;background:#141414;border-left:1px solid #222;padding:1rem;overflow:auto}
+      fieldset{border:1px solid #333;margin:0 0 1rem;padding:.75rem;border-radius:4px}
+      legend{padding:0 .5rem;font-size:.75rem;text-transform:uppercase;letter-spacing:1px;color:#999}
+      label{display:flex;align-items:center;justify-content:space-between;font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;margin:.4rem 0;color:#bbb;gap:.5rem}
+      input[type=range]{flex:1}
+      button{background:#333;color:#eee;border:1px solid #444;padding:.5rem .9rem;border-radius:4px;cursor:pointer;font-size:.75rem;letter-spacing:.5px}
+      button:hover{background:#3d3d3d}
+      .thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:.5rem}
+      .thumbs img{width:100%;aspect-ratio:1;object-fit:cover;border:1px solid #333;border-radius:4px;cursor:pointer;transition:.2s}
+      .thumbs img:hover{border-color:#666}
+      .thumbs img.active{outline:2px solid #4fa4ff;border-color:#4fa4ff}
+      footer{padding:.5rem 1rem;font-size:.65rem;text-align:center;background:#181818;border-top:1px solid #222}
+      a{color:#4fa4ff;text-decoration:none}
+      a:hover{text-decoration:underline}
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <h1>Framebuffer Texture Image Converter</h1>
+        <input id="file" type="file" accept="image/*" multiple />
+        <button id="downloadBtn" disabled>Download Processed</button>
+        <div class="spacer"></div>
+        <div id="progress"></div>
+      </header>
+      <main>
+        <div id="viewport"></div>
+        <aside id="sidepanel">
+          <fieldset>
+            <legend>Processing</legend>
+            <label> Effect
+              <select id="effectSelect">
+                <option value="none">None</option>
+                <option value="luma">Luma Displacement</option>
+                <option value="edges">Edge Pulse</option>
+                <option value="warp">RGB Warp</option>
+              </select>
+            </label>
+            <label> Auto Effect <input id="autoEffect" type="checkbox" checked /></label>
+            <label> Intensity <input id="intensity" type="range" min="0" max="2" step="0.01" value="0.8" /></label>
+            <label> Speed <input id="speed" type="range" min="0" max="5" step="0.01" value="1.2" /></label>
+            <label> Scale <input id="scale" type="range" min="0.1" max="4" step="0.01" value="1" /></label>
+            <button id="resetView">Reset View</button>
+          </fieldset>
+          <fieldset>
+            <legend>Uploaded Images</legend>
+            <div class="thumbs" id="thumbs"></div>
+          </fieldset>
+          <fieldset>
+            <legend>Framebuffer</legend>
+            <label> FBO Size <input id="fboSize" type="range" min="128" max="2048" step="64" value="1024" /></label>
+            <button id="recreateFBO">Recreate FBO</button>
+          </fieldset>
+          <fieldset>
+            <legend>Fractal Path</legend>
+            <label> Enable <input id="fractalMode" type="checkbox" /></label>
+            <label> Curve
+              <select id="fractalType">
+                <option value="hilbert">Hilbert</option>
+              </select>
+            </label>
+            <label> Order <input id="fractalOrder" type="range" min="1" max="7" step="1" value="5" /></label>
+            <button id="genFractal" disabled>Generate</button>
+            <div style="font-size:.6rem;line-height:1.2;opacity:.7;margin-top:.25rem">Creates a colored space-filling curve sampling the uploaded image. Higher order = more points.</div>
+          </fieldset>
+        </aside>
+      </main>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
