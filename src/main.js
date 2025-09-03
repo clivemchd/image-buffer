@@ -35,6 +35,7 @@ let offsetStart = new THREE.Vector2();
 let fractalLine = null;
 let fractalScene = null; // offscreen generation scene if needed
 const pinchState = { startDist:0, startZoom:1 };
+let firstImageFitDone = false;
 
 // heuristic cache
 const analysisCache = new WeakMap();
@@ -85,10 +86,12 @@ function createQuad() {
       uScale: { value: parseFloat(scaleInput.value) },
       uEffect: { value: 0 },
       uZoom: { value: controls.zoom },
-      uOffset: { value: controls.offset }
+      uOffset: { value: controls.offset },
+      uImgAspect: { value: 1 },
+      uViewAspect: { value: viewportEl.clientWidth / viewportEl.clientHeight }
     },
     vertexShader: `varying vec2 vUv;\nvoid main(){vUv=uv;gl_Position=vec4(position,1.0);}`,
-    fragmentShader: `precision highp float;\nuniform sampler2D uTexture;uniform float uTime;uniform float uIntensity;uniform float uSpeed;uniform float uScale;uniform int uEffect;uniform float uZoom;uniform vec2 uOffset;varying vec2 vUv;\n\nfloat luma(vec3 c){return dot(c, vec3(.299,.587,.114));}\n\nvoid main(){\n  vec2 uv = (vUv - .5);\n  uv = uv * uZoom + uOffset;\n  vec2 suv = uv + .5;\n  if(any(lessThan(suv, vec2(0.))) || any(greaterThan(suv, vec2(1.)))) { discard; }\n\n  vec2 sampleUv = suv;\n  if(uEffect==1){ // luma displacement\n    vec3 col = texture2D(uTexture, suv).rgb;\n    float lum = luma(col);\n    sampleUv += (col.rg - .5) * uIntensity * 0.1;\n    sampleUv += (lum - .5) * (uIntensity * 0.2);\n  } else if(uEffect==2){ // edge pulse\n    float e = 1.0/512.0 * uScale;\n    vec3 c = texture2D(uTexture, suv).rgb;\n    float gx = luma(texture2D(uTexture, suv+vec2(e,0.)).rgb) - luma(texture2D(uTexture, suv-vec2(e,0.)).rgb);\n    float gy = luma(texture2D(uTexture, suv+vec2(0.,e)).rgb) - luma(texture2D(uTexture, suv-vec2(0.,e)).rgb);\n    float edge = sqrt(gx*gx+gy*gy);\n    float pulse = sin(uTime*uSpeed*3.14159);\n    sampleUv += normalize(vec2(gx,gy)+1e-6) * edge * pulse * 0.02 * uIntensity;\n  } else if(uEffect==3){ // rgb warp\n    float t = uTime * uSpeed;\n    vec2 warp = vec2(sin(t+uv.y*5.), cos(t+uv.x*5.)) * 0.003 * uIntensity;\n    vec3 col;\n    col.r = texture2D(uTexture, suv + warp).r;\n    col.g = texture2D(uTexture, suv - warp).g;\n    col.b = texture2D(uTexture, suv + warp.yx).b;\n    gl_FragColor = vec4(col,1.);return;\n  }\n  vec4 color = texture2D(uTexture, sampleUv);\n  gl_FragColor = color;\n}`,
+    fragmentShader: `precision highp float;\nuniform sampler2D uTexture;uniform float uTime;uniform float uIntensity;uniform float uSpeed;uniform float uScale;uniform int uEffect;uniform float uZoom;uniform vec2 uOffset;uniform float uImgAspect;uniform float uViewAspect;varying vec2 vUv;\n\nfloat luma(vec3 c){return dot(c, vec3(.299,.587,.114));}\n\nvoid main(){\n  vec2 uv = (vUv - .5);\n  // letterbox/pillarbox scale so entire image fits viewport\n  vec2 scale = vec2(1.0);\n  float viewA = uViewAspect;\n  float imgA = uImgAspect;\n  if(viewA > imgA){\n    // viewport wider -> shrink X\n    scale.x = imgA / viewA;\n  } else {\n    // viewport taller -> shrink Y\n    scale.y = viewA / imgA;\n  }\n  uv *= scale * uZoom;\n  uv += uOffset;\n  vec2 suv = uv + .5;\n  if(any(lessThan(suv, vec2(0.))) || any(greaterThan(suv, vec2(1.)))) { discard; }\n  vec2 sampleUv = suv;\n  if(uEffect==1){\n    vec3 col = texture2D(uTexture, suv).rgb;\n    float lum = luma(col);\n    sampleUv += (col.rg - .5) * uIntensity * 0.1;\n    sampleUv += (lum - .5) * (uIntensity * 0.2);\n  } else if(uEffect==2){\n    float e = 1.0/512.0 * uScale;\n    vec3 c = texture2D(uTexture, suv).rgb;\n    float gx = luma(texture2D(uTexture, suv+vec2(e,0.)).rgb) - luma(texture2D(uTexture, suv-vec2(e,0.)).rgb);\n    float gy = luma(texture2D(uTexture, suv+vec2(0.,e)).rgb) - luma(texture2D(uTexture, suv-vec2(0.,e)).rgb);\n    float edge = sqrt(gx*gx+gy*gy);\n    float pulse = sin(uTime*uSpeed*3.14159);\n    sampleUv += normalize(vec2(gx,gy)+1e-6) * edge * pulse * 0.02 * uIntensity;\n  } else if(uEffect==3){\n    float t = uTime * uSpeed;\n    vec2 warp = vec2(sin(t+uv.y*5.), cos(t+uv.x*5.)) * 0.003 * uIntensity;\n    vec3 col;\n    col.r = texture2D(uTexture, suv + warp).r;\n    col.g = texture2D(uTexture, suv - warp).g;\n    col.b = texture2D(uTexture, suv + warp.yx).b;\n    gl_FragColor = vec4(col,1.);return;\n  }\n  vec4 color = texture2D(uTexture, sampleUv);\n  gl_FragColor = color;\n}`,
     transparent: true
   });
   quadMesh = new THREE.Mesh(geometry, material);
@@ -225,6 +228,16 @@ function setActiveTexture(index){
   if(!item) return;
   currentTexture = item.tex;
   quadMesh.material.uniforms.uTexture.value = currentTexture;
+  // update aspect ratios
+  const img = currentTexture.image;
+  if(img && img.width && img.height){
+    quadMesh.material.uniforms.uImgAspect.value = img.width / img.height;
+    quadMesh.material.uniforms.uViewAspect.value = viewportEl.clientWidth / viewportEl.clientHeight;
+    if(!firstImageFitDone){
+      // reset zoom/offset so full image fits (shader handles letterboxing)
+      controls.zoom = 1; controls.offset.set(0,0); firstImageFitDone = true;
+    }
+  }
   if(autoEffectInput.checked){
     chooseAutoEffect(currentTexture);
   }
@@ -308,6 +321,9 @@ function onResize(){
   renderer.setSize(viewportEl.clientWidth, viewportEl.clientHeight);
   camera.aspect = viewportEl.clientWidth/viewportEl.clientHeight;
   camera.updateProjectionMatrix();
+  if(quadMesh){
+    quadMesh.material.uniforms.uViewAspect.value = viewportEl.clientWidth / viewportEl.clientHeight;
+  }
 }
 
 function animate(){
