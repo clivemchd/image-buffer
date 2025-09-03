@@ -31,6 +31,10 @@ jobs:
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
 
+      - name: Copy CNAME (if present)
+        if: exists('CNAME')
+        run: cp CNAME dist/CNAME
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
