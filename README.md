@@ -43,3 +43,17 @@ npm run preview
 
 ## License
 MIT
+
+## GitHub Pages Deployment
+
+This project includes a GitHub Actions workflow (`.github/workflows/deploy.yml`) that builds the site and deploys the `dist` output to GitHub Pages whenever you push to `main` or `master`.
+
+Steps:
+1. Ensure the default branch is `main` or `master`.
+2. Push the repo to GitHub.
+3. In the repository Settings → Pages, choose "GitHub Actions" as the source (if prompted).
+4. After a push, the action will build and publish. The URL will be printed in the workflow summary (typically `https://<user>.github.io/<repo>/`).
+
+The `vite.config.js` sets `base` automatically when running inside GitHub Actions so relative asset paths work under a subpath repo.
+
+If your repository is a user/organization page named `<user>.github.io`, the base remains `/`.
