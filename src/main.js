@@ -17,6 +17,7 @@ const fboSizeInput = document.getElementById('fboSize');
 const recreateFBOButton = document.getElementById('recreateFBO');
 const resetViewButton = document.getElementById('resetView');
 const downloadBtn = document.getElementById('downloadBtn');
+const exportVideoBtn = document.getElementById('exportVideoBtn');
 const progressEl = document.getElementById('progress');
 const panelToggleBtn = document.getElementById('panelToggle');
 const panelOverlay = document.getElementById('panelOverlay');
@@ -36,6 +37,7 @@ let fractalLine = null;
 let fractalScene = null; // offscreen generation scene if needed
 const pinchState = { startDist:0, startZoom:1 };
 let firstImageFitDone = false;
+let captureState = null; // {active, frame, totalFrames, fps, duration, recorder, chunks, startTime}
 
 // heuristic cache
 const analysisCache = new WeakMap();
@@ -103,6 +105,7 @@ function setupEvents() {
   fileInput.addEventListener('change', onFiles); 
   effectSelect.addEventListener('change', () => {
     quadMesh.material.uniforms.uEffect.value = effectSelect.selectedIndex; 
+  updateDownloadState();
   });
   autoEffectInput.addEventListener('change', () => {
     if(autoEffectInput.checked && currentTexture){
@@ -115,6 +118,7 @@ function setupEvents() {
   recreateFBOButton.addEventListener('click', () => createRenderTarget());
   resetViewButton.addEventListener('click', () => { controls.zoom = 1; controls.offset.set(0,0); });
   downloadBtn.addEventListener('click', downloadImage);
+  exportVideoBtn.addEventListener('click', exportVideoLoop);
   if(panelToggleBtn){
     panelToggleBtn.addEventListener('click', () => document.body.classList.toggle('panel-open'));
   }
@@ -172,6 +176,8 @@ function setupEvents() {
     controls.offset.set(offsetStart.x - dx * controls.zoom, offsetStart.y + dy * controls.zoom);
   });
   window.addEventListener('pointerup', () => { isPanning = false; });
+  // Ensure correct initial visibility state
+  updateDownloadState();
 }
 
 async function onFiles(e) {
@@ -243,6 +249,22 @@ function setActiveTexture(index){
   }
   genFractalButton.disabled = !fractalModeInput.checked;
   thumbsEl.querySelectorAll('img').forEach(img => img.classList.toggle('active', parseInt(img.dataset.index,10)===index));
+  updateDownloadState();
+}
+
+function updateDownloadState(){
+  const isRgbWarp = quadMesh.material.uniforms.uEffect.value === 3; // effect index 3
+  downloadBtn.disabled = !currentTexture || !isRgbWarp;
+  exportVideoBtn.disabled = !currentTexture || !isRgbWarp;
+  // Show/hide video button entirely based on effect
+  exportVideoBtn.style.display = isRgbWarp ? '' : 'none';
+  if(!isRgbWarp){
+    downloadBtn.title = 'Only available for RGB Warp effect';
+    exportVideoBtn.title = 'Only available for RGB Warp effect';
+  } else {
+    downloadBtn.title = '';
+    exportVideoBtn.title = '';
+  }
 }
 
 function analyzeImage(texture){
@@ -317,6 +339,36 @@ function downloadImage(){
   a.click();
 }
 
+async function exportVideoLoop(){
+  if(captureState?.active) return; // already capturing
+  const isRgbWarp = quadMesh.material.uniforms.uEffect.value === 3;
+  if(!isRgbWarp){
+    progressEl.textContent = 'Switch to RGB Warp to export';
+    return;
+  }
+  const fps = 30; const duration = 30; const totalFrames = fps * duration;
+  const stream = renderer.domElement.captureStream(fps);
+  const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm;codecs=vp8';
+  const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6_000_000 });
+  const chunks = [];
+  recorder.ondataavailable = e => { if(e.data.size) chunks.push(e.data); };
+  recorder.onstop = () => {
+    const blob = new Blob(chunks, { type: 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'rgb-warp-loop.webm'; a.click();
+    setTimeout(()=>URL.revokeObjectURL(url), 5000);
+    progressEl.textContent = 'Video export complete';
+    captureState = null;
+    downloadBtn.disabled = false;
+    exportVideoBtn.disabled = false;
+  };
+  captureState = { active:true, frame:0, totalFrames, fps, duration, recorder, chunks, startTime: performance.now() };
+  progressEl.textContent = 'Rendering video (0%)';
+  downloadBtn.disabled = true; exportVideoBtn.disabled = true;
+  recorder.start();
+}
+
 function onResize(){
   renderer.setSize(viewportEl.clientWidth, viewportEl.clientHeight);
   camera.aspect = viewportEl.clientWidth/viewportEl.clientHeight;
@@ -328,8 +380,32 @@ function onResize(){
 
 function animate(){
   requestAnimationFrame(animate);
+  if(captureState?.active){
+    const { frame, totalFrames, fps, duration } = captureState;
+    // Determine target frame based on elapsed real time
+    const elapsed = performance.now() - captureState.startTime;
+    const targetFrame = Math.floor(elapsed / 1000 * fps);
+    if(targetFrame >= frame && frame < totalFrames){
+      // Loopable time mapping: 0..2PI
+      const loopT = (frame / totalFrames) * Math.PI * 2.0;
+      quadMesh.material.uniforms.uTime.value = loopT;
+      renderer.setRenderTarget(null);
+      renderer.render(orthoScene, quadCamera);
+      captureState.frame++;
+      if(frame % 10 === 0){
+        progressEl.textContent = `Rendering video (${Math.round(frame/totalFrames*100)}%)`;
+      }
+      if(captureState.frame >= totalFrames){
+        progressEl.textContent = 'Finalizing video...';
+        captureState.recorder.stop();
+      }
+    } else if(frame >= totalFrames){
+      // waiting for recorder stop
+    }
+    return; // skip normal animation while capturing to keep deterministic frames
+  }
   const t = clock.getElapsedTime();
-  quadMesh.material.uniforms.uTime.value = t;
+  quadMesh.material.uniforms.uTime.value = t; // normal live mode
   quadMesh.material.uniforms.uZoom.value = controls.zoom;
   quadMesh.material.uniforms.uOffset.value = controls.offset;
   if(fractalLine){
